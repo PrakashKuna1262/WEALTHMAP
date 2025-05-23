@@ -8,53 +8,52 @@ const fs = require('fs');
 
 // Set up multer for file uploads
 const storage = multer.diskStorage({
-  destination: function(req, file, cb) {
-    const uploadDir = 'uploads/company-logos';
-    // Create directory if it doesn't exist
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
+  destination: (req, file, cb) => {
+    const dir = path.join(__dirname, '../uploads/company');
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
     }
-    cb(null, uploadDir);
+    cb(null, dir);
   },
-  filename: function(req, file, cb) {
-    cb(null, `company-${Date.now()}${path.extname(file.originalname)}`);
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
   }
 });
-
-// File filter for images only
-const fileFilter = (req, file, cb) => {
-  if (file.mimetype.startsWith('image/')) {
-    cb(null, true);
-  } else {
-    cb(new Error('Only image files are allowed!'), false);
-  }
-};
 
 const upload = multer({ 
-  storage: storage,
-  limits: {
-    fileSize: 5 * 1024 * 1024 // 5MB max file size
-  },
-  fileFilter: fileFilter
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|gif/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+    
+    if (extname && mimetype) {
+      return cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed!'));
+    }
+  }
 });
 
-// Get company details for the logged-in admin
+// Get company details
 router.get('/', auth, async (req, res) => {
   try {
     const company = await Company.findOne({ admin: req.admin.id });
     
     if (!company) {
-      return res.status(404).json({ message: 'Company details not found' });
+      return res.status(404).json({ message: 'Company not found' });
     }
     
     res.json(company);
   } catch (error) {
-    console.error('Error fetching company details:', error);
+    console.error('Error fetching company:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
-// Create or update company details
+// Create or update company
 router.post('/', auth, upload.single('logo'), async (req, res) => {
   try {
     const {
@@ -62,12 +61,12 @@ router.post('/', auth, upload.single('logo'), async (req, res) => {
       description,
       industry,
       website,
-      email,
       phone,
-      street,
+      email,
+      address,
       city,
       state,
-      zipCode,
+      zip,
       country,
       linkedin,
       twitter,
@@ -80,40 +79,37 @@ router.post('/', auth, upload.single('logo'), async (req, res) => {
     // Build company object
     const companyFields = {
       admin: req.admin.id,
-      updatedAt: Date.now()
+      name,
+      description,
+      industry,
+      website,
+      contact: {
+        phone,
+        email
+      },
+      address: {
+        street: address,
+        city,
+        state,
+        zip,
+        country
+      },
+      socialMedia: {
+        linkedin,
+        twitter,
+        facebook,
+        instagram
+      },
+      foundedYear,
+      employeeCount
     };
     
-    if (name) companyFields.name = name;
-    if (description) companyFields.description = description;
-    if (industry) companyFields.industry = industry;
-    if (website) companyFields.website = website;
-    if (email) companyFields.email = email;
-    if (phone) companyFields.phone = phone;
-    
-    // Address fields
-    companyFields.address = {};
-    if (street) companyFields.address.street = street;
-    if (city) companyFields.address.city = city;
-    if (state) companyFields.address.state = state;
-    if (zipCode) companyFields.address.zipCode = zipCode;
-    if (country) companyFields.address.country = country;
-    
-    // Social media fields
-    companyFields.socialMedia = {};
-    if (linkedin) companyFields.socialMedia.linkedin = linkedin;
-    if (twitter) companyFields.socialMedia.twitter = twitter;
-    if (facebook) companyFields.socialMedia.facebook = facebook;
-    if (instagram) companyFields.socialMedia.instagram = instagram;
-    
-    if (foundedYear) companyFields.foundedYear = foundedYear;
-    if (employeeCount) companyFields.employeeCount = employeeCount;
-    
-    // Handle logo upload
+    // Add logo if uploaded
     if (req.file) {
-      companyFields.logo = `/uploads/company-logos/${req.file.filename}`;
+      companyFields.logo = `/uploads/company/${req.file.filename}`;
     }
     
-    // Check if company exists
+    // Find existing company or create new one
     let company = await Company.findOne({ admin: req.admin.id });
     
     if (company) {
@@ -123,45 +119,15 @@ router.post('/', auth, upload.single('logo'), async (req, res) => {
         { $set: companyFields },
         { new: true }
       );
-      
-      return res.json({ message: 'Company details updated', company });
-    }
-    
-    // Create new company
-    company = new Company(companyFields);
-    await company.save();
-    
-    res.status(201).json({ message: 'Company details created', company });
-  } catch (error) {
-    console.error('Error saving company details:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
-  }
-});
-
-// Delete company logo
-router.delete('/logo', auth, async (req, res) => {
-  try {
-    const company = await Company.findOne({ admin: req.admin.id });
-    
-    if (!company) {
-      return res.status(404).json({ message: 'Company not found' });
-    }
-    
-    // Delete the file if it exists
-    if (company.logo) {
-      const logoPath = path.join(__dirname, '..', company.logo);
-      if (fs.existsSync(logoPath)) {
-        fs.unlinkSync(logoPath);
-      }
-      
-      // Update company record
-      company.logo = '';
+    } else {
+      // Create new company
+      company = new Company(companyFields);
       await company.save();
     }
     
-    res.json({ message: 'Company logo removed', company });
+    res.json(company);
   } catch (error) {
-    console.error('Error deleting company logo:', error);
+    console.error('Error updating company:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });

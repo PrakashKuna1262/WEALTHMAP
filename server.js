@@ -74,11 +74,17 @@ mongoose.connect(process.env.MONGODB_URI, {
 const propertyRoutes = require('./routes/propertyRoutes');
 const bookmarkRoutes = require('./routes/bookmarkRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const employeeRoutes = require('./routes/employeeRoutes');
+const feedbackRoutes = require('./routes/feedbackRoutes');
+const companyRoutes = require('./routes/companyRoutes');
 
 // Use routes
 app.use('/api/properties', propertyRoutes);
 app.use('/api/bookmarks', bookmarkRoutes);
 app.use('/api/admins', adminRoutes);
+app.use('/api/employees', employeeRoutes);
+app.use('/api/feedback', feedbackRoutes);
+app.use('/api/company', companyRoutes);
 
 // Add error handling middleware
 app.use((err, req, res, next) => {
@@ -92,6 +98,7 @@ app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`API available at http://localhost:${PORT}`);
 });
+
 
 
 
