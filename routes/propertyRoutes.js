@@ -118,6 +118,7 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+// Make sure your bookmark routes are correctly defined
 // Get bookmarks for a user
 router.get('/bookmarks/:userEmail', async (req, res) => {
   try {
@@ -193,6 +194,7 @@ router.delete('/bookmarks/:id', async (req, res) => {
 });
 
 module.exports = router;
+
 
 
 

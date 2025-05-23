@@ -27,6 +27,12 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'x-auth-token']
 }));
 
+// Add request logging middleware
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.originalUrl}`);
+  next();
+});
+
 // Create uploads directory if it doesn't exist
 const uploadsDir = path.join(__dirname, 'uploads');
 const propertiesDir = path.join(uploadsDir, 'properties');
@@ -64,17 +70,19 @@ mongoose.connect(process.env.MONGODB_URI, {
   console.log('Server will continue without database functionality');
 });
 
-// Routes
-app.use('/api/admins', require('./routes/adminRoutes'));
-app.use('/api/employees', require('./routes/employeeRoutes'));
-app.use('/api/company', require('./routes/companyRoutes'));
-app.use('/api/feedback', require('./routes/feedbackRoutes'));
-app.use('/api/properties', require('./routes/propertyRoutes'));
-app.use('/api/bookmarks', require('./routes/bookmarkRoutes'));
+// Import routes
+const propertyRoutes = require('./routes/propertyRoutes');
+const bookmarkRoutes = require('./routes/bookmarkRoutes');
+const adminRoutes = require('./routes/adminRoutes');
 
-// Error handling middleware
+// Use routes
+app.use('/api/properties', propertyRoutes);
+app.use('/api/bookmarks', bookmarkRoutes);
+app.use('/api/admins', adminRoutes);
+
+// Add error handling middleware
 app.use((err, req, res, next) => {
-  console.error('Server error:', err.stack);
+  console.error(`Error processing ${req.method} ${req.originalUrl}:`, err);
   res.status(500).json({ message: 'Server error', error: err.message });
 });
 
@@ -84,6 +92,9 @@ app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`API available at http://localhost:${PORT}`);
 });
+
+
+
 
 
 
