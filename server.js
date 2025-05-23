@@ -15,8 +15,10 @@ const app = express();
 app.use(express.json());
 app.use(cors({
   origin: [
+    'https://wealthmapejx.vercel.app',
+    'https://wealthmapejx-k12gpkvlz-prakash-kunas-projects.vercel.app',
     process.env.CLIENT_URL,
-    process.env.LOCAL_CLIENT_URL,
+    'http://localhost:3000',
     'http://localhost:3001',
     'http://localhost:10000'
   ],
@@ -82,6 +84,7 @@ app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`API available at http://localhost:${PORT}`);
 });
+
 
 
 
