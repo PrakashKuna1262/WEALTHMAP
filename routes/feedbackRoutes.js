@@ -112,23 +112,102 @@ router.get('/admin', auth, async (req, res) => {
 // Get feedback for employee (by email)
 router.get('/employee', auth, async (req, res) => {
   try {
-    // Get admin to find company name
-    const admin = await Admin.findById(req.admin.id);
-    if (!admin) {
-      return res.status(404).json({ message: 'Admin not found' });
+    // Get email from request query or from auth token
+    const email = req.query.email || (req.employee ? req.employee.email : null);
+    
+    if (!email) {
+      return res.status(400).json({ message: 'Email is required' });
     }
     
-    // Find feedback where user is sender or receiver
+    console.log('Fetching feedback for employee:', email);
+    
+    // Find feedback where employee is sender or receiver
     const feedback = await Feedback.find({
       $or: [
-        { senderEmail: req.admin.email, companyName: admin.companyName },
-        { receiverEmail: req.admin.email, companyName: admin.companyName }
+        { senderEmail: email },
+        { receiverEmail: email }
       ]
     }).sort({ sentAt: -1 });
+    
+    console.log(`Found ${feedback.length} feedback items for employee ${email}`);
     
     res.json(feedback);
   } catch (error) {
     console.error('Error fetching employee feedback:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Submit feedback from employee
+router.post('/employee', upload.array('attachments', 5), async (req, res) => {
+  try {
+    const { senderEmail, receiverEmail, subject, description, companyName } = req.body;
+    
+    // Validate required fields
+    if (!senderEmail || !receiverEmail || !subject || !description || !companyName) {
+      return res.status(400).json({ message: 'All fields are required' });
+    }
+    
+    console.log('Creating new feedback from employee with data:', {
+      senderEmail,
+      receiverEmail,
+      subject,
+      description,
+      companyName,
+      attachmentsCount: req.files ? req.files.length : 0
+    });
+    
+    // Find admin for this company
+    const admin = await Admin.findOne({ companyName });
+    if (!admin) {
+      return res.status(404).json({ message: 'Company admin not found' });
+    }
+    
+    // Create attachments array from uploaded files
+    const attachments = req.files ? req.files.map(file => ({
+      filename: file.originalname,
+      path: file.path,
+      mimetype: file.mimetype
+    })) : [];
+    
+    // Create new feedback
+    const feedback = new Feedback({
+      senderEmail,
+      receiverEmail,
+      subject,
+      description,
+      companyName,
+      attachments,
+      admin: admin._id
+    });
+    
+    await feedback.save();
+    
+    // Send email notification to receiver (if implemented)
+    try {
+      if (typeof sendFeedbackNotification === 'function') {
+        await sendFeedbackNotification(
+          receiverEmail,
+          subject,
+          companyName,
+          senderEmail
+        );
+      }
+    } catch (emailError) {
+      console.error('Error sending email notification:', emailError);
+      // Continue even if email fails
+    }
+    
+    res.status(201).json({
+      message: 'Feedback submitted successfully',
+      feedback: {
+        id: feedback._id,
+        subject: feedback.subject,
+        sentAt: feedback.sentAt
+      }
+    });
+  } catch (error) {
+    console.error('Error submitting feedback from employee:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -150,7 +229,7 @@ router.get('/new', auth, (req, res) => {
 });
 
 // Get single feedback by ID
-router.get('/:id', auth, async (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
     // Special case for "new" (should be handled by the route above)
     if (req.params.id === 'new') {
@@ -174,32 +253,9 @@ router.get('/:id', auth, async (req, res) => {
     
     console.log(`Found feedback: ${feedback._id}`);
     
-    // Check if admin exists in the feedback document
-    if (!feedback.admin) {
-      console.error('Feedback has no admin property:', feedback);
-      return res.status(500).json({ message: 'Invalid feedback data: missing admin reference' });
-    }
-    
-    console.log(`Feedback admin ID: ${feedback.admin}`);
-    console.log(`Request admin ID: ${req.admin.id}, email: ${req.admin.email}`);
-    
-    // Convert ObjectId to string for comparison
-    const feedbackAdminId = feedback.admin.toString();
-    
-    // Check if user is authorized to view this feedback
-    const isAdmin = feedbackAdminId === req.admin.id;
-    const isSender = feedback.senderEmail === req.admin.email;
-    const isReceiver = feedback.receiverEmail === req.admin.email;
-    
-    console.log(`Authorization check: isAdmin=${isAdmin}, isSender=${isSender}, isReceiver=${isReceiver}`);
-    
-    if (!isAdmin && !isSender && !isReceiver) {
-      return res.status(403).json({ message: 'Not authorized to view this feedback' });
-    }
-    
     res.json(feedback);
   } catch (error) {
-    console.error('Error fetching feedback:', error);
+    console.error('Error fetching feedback by ID:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -298,7 +354,69 @@ router.put('/review/:id', auth, async (req, res) => {
   }
 });
 
+// Respond to feedback as employee
+router.put('/employee/respond/:id', auth, async (req, res) => {
+  try {
+    const { response } = req.body;
+    
+    if (!response) {
+      return res.status(400).json({ message: 'Response is required' });
+    }
+    
+    // Check if the ID is valid
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid feedback ID format' });
+    }
+    
+    // Find feedback
+    const feedback = await Feedback.findById(req.params.id);
+    
+    if (!feedback) {
+      return res.status(404).json({ message: 'Feedback not found' });
+    }
+    
+    // Check if employee is authorized to respond (must be receiver)
+    if (feedback.receiverEmail !== req.employee.email) {
+      return res.status(403).json({ message: 'Not authorized to respond to this feedback' });
+    }
+    
+    // Update feedback
+    feedback.response = response;
+    feedback.status = 'responded';
+    feedback.respondedAt = Date.now();
+    
+    await feedback.save();
+    
+    // Send email notification to sender
+    try {
+      await sendFeedbackResponse(
+        feedback.senderEmail,
+        feedback.subject,
+        response,
+        req.employee.username || 'Employee'
+      );
+    } catch (emailError) {
+      console.error('Error sending email notification:', emailError);
+      // Continue even if email fails
+    }
+    
+    res.json({
+      message: 'Response sent successfully',
+      feedback
+    });
+  } catch (error) {
+    console.error('Error responding to feedback as employee:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
 module.exports = router;
+
+
+
+
+
+
 
 
 

@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+// const config = require('config');
 
 module.exports = function(req, res, next) {
   // Get token from header
@@ -10,22 +11,25 @@ module.exports = function(req, res, next) {
   }
   
   try {
+    // Use environment variable or fallback for JWT secret
+    const jwtSecret = process.env.JWT_SECRET || 'jwtSecret';
+    
     // Verify token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'jwtSecret');
-    
-    // Add admin from payload to request
-    req.admin = {
-      id: decoded.id,
-      role: decoded.role
-    };
-    
-    console.log('Auth middleware - decoded token:', { id: decoded.id, role: decoded.role });
-    
+    const decoded = jwt.verify(token, jwtSecret);
+
+    // Check if token contains admin or employee data
+    if (decoded.admin) {
+      req.admin = decoded.admin;
+    } else if (decoded.employee) {
+      req.employee = decoded.employee;
+    } else {
+      return res.status(401).json({ message: 'Invalid token structure' });
+    }
+
     next();
   } catch (err) {
     console.error('Token verification error:', err);
     res.status(401).json({ message: 'Token is not valid' });
   }
 };
-
 
